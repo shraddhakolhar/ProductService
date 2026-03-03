@@ -4,6 +4,7 @@ import com.scaler.productservice.entity.ProductEntity;
 import lombok.Getter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -27,13 +28,30 @@ public class FakeStoreProductReadService implements ProductReadService {
         this.restTemplate = restTemplate;
     }
 
+    /**
+     * Cache paginated product list
+     * Cache key includes page + size to avoid collisions
+     */
     @Override
+    @Cacheable(
+            cacheNames = "product_get_all",
+            key = "'page=' + #pageable.pageNumber + ':size=' + #pageable.pageSize",
+            unless = "#result == null"
+    )
     public Page<ProductEntity> getAll(Pageable pageable) {
         List<ProductEntity> products = fetchAll();
         return toPage(products, pageable);
     }
 
+    /**
+     * Cache product by ID
+     */
     @Override
+    @Cacheable(
+            cacheNames = "product_by_id",
+            key = "#id",
+            unless = "#result == null"
+    )
     public ProductEntity getById(Long id) {
         FakeStoreDto dto =
                 restTemplate.getForObject(fakeStoreUrl + "/" + id, FakeStoreDto.class);
@@ -44,7 +62,15 @@ public class FakeStoreProductReadService implements ProductReadService {
         return dto.toEntity();
     }
 
+    /**
+     * Cache search results (keyword + pagination aware)
+     */
     @Override
+    @Cacheable(
+            cacheNames = "product_search",
+            key = "'kw=' + #keyword + ':page=' + #pageable.pageNumber + ':size=' + #pageable.pageSize",
+            unless = "#result == null"
+    )
     public Page<ProductEntity> search(String keyword, Pageable pageable) {
         List<ProductEntity> filtered =
                 fetchAll().stream()
@@ -54,6 +80,10 @@ public class FakeStoreProductReadService implements ProductReadService {
         return toPage(filtered, pageable);
     }
 
+    /**
+     * Internal API fetch (NOT cached directly)
+     * Cached indirectly via public methods above
+     */
     private List<ProductEntity> fetchAll() {
         FakeStoreDto[] response =
                 restTemplate.getForObject(fakeStoreUrl, FakeStoreDto[].class);
